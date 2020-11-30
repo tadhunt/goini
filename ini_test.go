@@ -882,15 +882,22 @@ func TestDiffKeyOnlyInB(t *testing.T) {
 	err = bini.Parse(braw, "\n", "=")
 	assert.Equal(t, err, nil)
 
-	results := DiffINI(aini, bini)
-	assert.Equal(t, len(results), 1)
+	expectedResults := []*ExpectedDiffResult{
+		&ExpectedDiffResult{
+			Used: false,
+			Expected: &DiffResult{
+				State: DIFF_KEY_ONLY_IN_B,
+				Section: "",
+				Key: "foo",
+				AVal: "",
+				BVal: "onlyinb",
+			},
+		},
+	}
 
-	result := results[0]
-	assert.Equal(t, result.State, DIFF_KEY_ONLY_IN_B)
-	assert.Equal(t, result.Section, "")
-	assert.Equal(t, result.Key, "foo")
-	assert.Equal(t, result.AVal, "")
-	assert.Equal(t, result.BVal, "onlyinb")
+	results := DiffINI(aini, bini)
+	err = checkResults(expectedResults, results)
+	assert.Equal(t, err, nil)
 }
 
 func TestDiffSectionOnlyIn(t *testing.T) {
@@ -932,24 +939,6 @@ func TestDiffSectionOnlyIn(t *testing.T) {
 	results := DiffINI(aini, bini)
 	err = checkResults(expectedResults, results)
 	assert.Equal(t, err, nil)
-/*
-	results := DiffINI(aini, bini)
-	assert.Equal(t, len(results), 2)
-
-	result := results[0]
-	assert.Equal(t, result.State, DIFF_SECTION_ONLY_IN_A)
-	assert.Equal(t, result.Section, "asec")
-	assert.Equal(t, result.Key, "")
-	assert.Equal(t, result.AVal, "")
-	assert.Equal(t, result.BVal, "")
-
-	result = results[1]
-	assert.Equal(t, result.State, DIFF_SECTION_ONLY_IN_B)
-	assert.Equal(t, result.Section, "")
-	assert.Equal(t, result.Key, "")
-	assert.Equal(t, result.AVal, "")
-	assert.Equal(t, result.BVal, "")
-*/
 
 	braw = []byte("[bsec]\na=1\nb=True\nc=\"hello world\"\nd='6'\nfoo=onlyinb")
 	bini = New()
@@ -983,24 +972,6 @@ func TestDiffSectionOnlyIn(t *testing.T) {
 	results = DiffINI(aini, bini)
 	err = checkResults(expectedResults, results)
 	assert.Equal(t, err, nil)
-/*
-	results = DiffINI(aini, bini)
-	assert.Equal(t, len(results), 2)
-
-	result = results[0]
-	assert.Equal(t, result.State, DIFF_SECTION_ONLY_IN_A)
-	assert.Equal(t, result.Section, "asec")
-	assert.Equal(t, result.Key, "")
-	assert.Equal(t, result.AVal, "")
-	assert.Equal(t, result.BVal, "")
-
-	result = results[1]
-	assert.Equal(t, result.State, DIFF_SECTION_ONLY_IN_B)
-	assert.Equal(t, result.Section, "bsec")
-	assert.Equal(t, result.Key, "")
-	assert.Equal(t, result.AVal, "")
-	assert.Equal(t, result.BVal, "")
-*/
 }
 
 // run this by command : go test -test.bench="Benchmark1"

@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Modifications Copyright © 2019-2020 Tad Hunt <tadhunt@gmail.com>
+
 package goini
 
 import (
@@ -10,12 +12,8 @@ import (
 	"errors"
 	"io"
 	"io/ioutil"
-	"log"
 	"strconv"
 )
-
-// Suppress error if they are not otherwise used.
-var _ = log.Printf
 
 type Kvmap map[string]string
 type SectionMap map[string]Kvmap
@@ -346,4 +344,95 @@ func (ini *INI) parseINI(data []byte, lineSep, kvSep string) error {
 		kvmap[string(k)] = string(v)
 	}
 	return nil
+}
+
+const (
+	DIFF_SECTION_ONLY_IN_A = iota
+	DIFF_KEY_ONLY_IN_A
+	DIFF_VALUES_DIFFER
+	DIFF_SECTION_ONLY_IN_B
+	DIFF_KEY_ONLY_IN_B
+)
+
+type DiffResult struct {
+	State   int
+	Section string
+	Key     string
+	AVal    string
+	BVal    string
+}
+
+//
+// note: return order is not stable
+//
+func DiffINI(a, b *INI) []*DiffResult  {
+	var results []*DiffResult
+
+	for asection, acontents := range a.sections {
+		bsection, bSectionExists := b.sections[asection]
+		if !bSectionExists /*|| asection == "" && len(bsection) == 0 */ {
+			result := &DiffResult{
+				State: DIFF_SECTION_ONLY_IN_A,
+				Section: asection,
+			}
+			results = append(results, result)
+			continue
+		}
+
+		for akey, aval := range acontents {
+			bval, bKeyExists := bsection[akey]
+			if !bKeyExists {
+				result := &DiffResult{
+					State: DIFF_KEY_ONLY_IN_A,
+					Section: asection,
+					Key: akey,
+					AVal: aval,
+				}
+				results = append(results, result)
+				continue
+			}
+
+			if aval != bval {
+				result := &DiffResult{
+					State: DIFF_VALUES_DIFFER,
+					Section: asection,
+					Key: akey,
+					AVal: aval,
+					BVal: bval,
+				}
+				results = append(results, result)
+				continue
+			}
+		}
+	}
+
+	for bsection, bcontents := range b.sections {
+		asection, aSectionExists := a.sections[bsection]
+		if !aSectionExists /* || bsection == "" && len(asection) == 0 */ {
+			result := &DiffResult{
+				State: DIFF_SECTION_ONLY_IN_B,
+				Section: bsection,
+			}
+			results = append(results, result)
+			continue
+		}
+
+		for bkey, bval := range bcontents {
+			_, aKeyExists := asection[bkey]
+			if !aKeyExists {
+				result := &DiffResult{
+					State: DIFF_KEY_ONLY_IN_B,
+					Section: bsection,
+					Key: bkey,
+					BVal: bval,
+				}
+				results = append(results, result)
+				continue
+			}
+
+			// the asection loop above handles aval != bval, so we don't repeat it here
+		}
+	}
+
+	return results
 }

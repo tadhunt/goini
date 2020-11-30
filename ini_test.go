@@ -5,6 +5,8 @@
 package goini
 
 import (
+	"fmt"
+	"log"
 	"bytes"
 	"os"
 	"path/filepath"
@@ -728,6 +730,277 @@ func TestQuoteValue(t *testing.T) {
 	v, ok = ini.Get("d")
 	assert.Equal(t, v, "6")
 	assert.Equal(t, ok, true)
+}
+
+func TestDiffIdentical(t *testing.T) {
+	araw := []byte("a=1\nb=True\nc=\"hello world\"\nd='6'")
+	aini := New()
+	err := aini.Parse(araw, "\n", "=")
+	assert.Equal(t, err, nil)
+
+	braw := []byte("a=1\nb=True\nc=\"hello world\"\nd='6'")
+	bini := New()
+	err = bini.Parse(braw, "\n", "=")
+	assert.Equal(t, err, nil)
+
+	results := DiffINI(aini, bini)
+	assert.Equal(t, len(results), 0)
+}
+
+type ExpectedDiffResult struct {
+	Used       bool
+	Expected   *DiffResult
+}
+
+func (e *ExpectedDiffResult) Matches(d *DiffResult) bool {
+	if e.Expected.State != d.State {
+		return false
+	}
+	if e.Expected.Section != d.Section {
+		return false
+	}
+	if e.Expected.Key != d.Key {
+		return false
+	}
+	if e.Expected.AVal != d.AVal {
+		return false
+	}
+	if e.Expected.BVal != d.BVal {
+		return false
+	}
+
+	return true
+}
+
+func checkResults(expectedResults []*ExpectedDiffResult, results []*DiffResult) error {
+	if len(expectedResults) != len(results) {
+		for i := range results {
+			log.Printf("result %d: %#v\n", i, results[i])
+		}
+		return fmt.Errorf("len(expectedResults) %d != len(results) %d", len(expectedResults), len(results))
+	}
+
+	for i := range results {
+		result := results[i]
+		matched := false
+		for j := range expectedResults {
+			e := expectedResults[j]
+
+			if e.Used {
+				continue
+			}
+			if e.Matches(result) {
+				e.Used = true
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return fmt.Errorf("result %d [%#v]: no match", i, result)
+		}
+	}
+
+	return nil
+}
+
+func TestDiffValuesDiffer(t *testing.T) {
+	araw := []byte("a=1\nb=True\nc=\"hello world\"\nd='6'")
+	aini := New()
+	err := aini.Parse(araw, "\n", "=")
+	assert.Equal(t, err, nil)
+
+	braw := []byte("a=2\nb=True\nc=\"hello world!\"\nd='6'")
+	bini := New()
+	err = bini.Parse(braw, "\n", "=")
+	assert.Equal(t, err, nil)
+
+	expectedResults := []*ExpectedDiffResult{
+		&ExpectedDiffResult{
+			Used: false,
+			Expected: &DiffResult{
+				State: DIFF_VALUES_DIFFER,
+				Section: "",
+				Key: "a",
+				AVal: "1",
+				BVal: "2",
+			},
+		},
+		&ExpectedDiffResult{
+			Used: false,
+			Expected: &DiffResult{
+				State: DIFF_VALUES_DIFFER,
+				Section: "",
+				Key: "c",
+				AVal: "\"hello world\"",
+				BVal: "\"hello world!\"",
+			},
+		},
+	}
+
+	results := DiffINI(aini, bini)
+	err = checkResults(expectedResults, results)
+	assert.Equal(t, err, nil)
+}
+
+func TestDiffKeyOnlyInA(t *testing.T) {
+	araw := []byte("a=1\nb=True\nc=\"hello world\"\nd='6'\nfoo=onlyina")
+	aini := New()
+	err := aini.Parse(araw, "\n", "=")
+	assert.Equal(t, err, nil)
+
+	braw := []byte("a=1\nb=True\nc=\"hello world\"\nd='6'")
+	bini := New()
+	err = bini.Parse(braw, "\n", "=")
+	assert.Equal(t, err, nil)
+
+	expectedResults := []*ExpectedDiffResult{
+		&ExpectedDiffResult{
+			Used: false,
+			Expected: &DiffResult{
+				State: DIFF_KEY_ONLY_IN_A,
+				Section: "",
+				Key: "foo",
+				AVal: "onlyina",
+				BVal: "",
+			},
+		},
+	}
+
+	results := DiffINI(aini, bini)
+	err = checkResults(expectedResults, results)
+	assert.Equal(t, err, nil)
+}
+
+func TestDiffKeyOnlyInB(t *testing.T) {
+	araw := []byte("a=1\nb=True\nc=\"hello world\"\nd='6'")
+	aini := New()
+	err := aini.Parse(araw, "\n", "=")
+	assert.Equal(t, err, nil)
+
+	braw := []byte("a=1\nb=True\nc=\"hello world\"\nd='6'\nfoo=onlyinb")
+	bini := New()
+	err = bini.Parse(braw, "\n", "=")
+	assert.Equal(t, err, nil)
+
+	results := DiffINI(aini, bini)
+	assert.Equal(t, len(results), 1)
+
+	result := results[0]
+	assert.Equal(t, result.State, DIFF_KEY_ONLY_IN_B)
+	assert.Equal(t, result.Section, "")
+	assert.Equal(t, result.Key, "foo")
+	assert.Equal(t, result.AVal, "")
+	assert.Equal(t, result.BVal, "onlyinb")
+}
+
+func TestDiffSectionOnlyIn(t *testing.T) {
+	araw := []byte("[asec]\na=1\nb=True\nc=\"hello world\"\nd='6'")
+	aini := New()
+	aini.SetParseSection(true)
+	err := aini.Parse(araw, "\n", "=")
+	assert.Equal(t, err, nil)
+
+	braw := []byte("foo=onlyinb")
+	bini := New()
+	bini.SetParseSection(true)
+	err = bini.Parse(braw, "\n", "=")
+	assert.Equal(t, err, nil)
+
+	expectedResults := []*ExpectedDiffResult{
+		&ExpectedDiffResult{
+			Used: false,
+			Expected: &DiffResult{
+				State: DIFF_SECTION_ONLY_IN_A,
+				Section: "asec",
+				Key: "",
+				AVal: "",
+				BVal: "",
+			},
+		},
+		&ExpectedDiffResult{
+			Used: false,
+			Expected: &DiffResult{
+				State: DIFF_KEY_ONLY_IN_B,
+				Section: "",
+				Key: "foo",
+				AVal: "",
+				BVal: "onlyinb",
+			},
+		},
+	}
+
+	results := DiffINI(aini, bini)
+	err = checkResults(expectedResults, results)
+	assert.Equal(t, err, nil)
+/*
+	results := DiffINI(aini, bini)
+	assert.Equal(t, len(results), 2)
+
+	result := results[0]
+	assert.Equal(t, result.State, DIFF_SECTION_ONLY_IN_A)
+	assert.Equal(t, result.Section, "asec")
+	assert.Equal(t, result.Key, "")
+	assert.Equal(t, result.AVal, "")
+	assert.Equal(t, result.BVal, "")
+
+	result = results[1]
+	assert.Equal(t, result.State, DIFF_SECTION_ONLY_IN_B)
+	assert.Equal(t, result.Section, "")
+	assert.Equal(t, result.Key, "")
+	assert.Equal(t, result.AVal, "")
+	assert.Equal(t, result.BVal, "")
+*/
+
+	braw = []byte("[bsec]\na=1\nb=True\nc=\"hello world\"\nd='6'\nfoo=onlyinb")
+	bini = New()
+	bini.SetParseSection(true)
+	err = bini.Parse(braw, "\n", "=")
+	assert.Equal(t, err, nil)
+
+	expectedResults = []*ExpectedDiffResult{
+		&ExpectedDiffResult{
+			Used: false,
+			Expected: &DiffResult{
+				State: DIFF_SECTION_ONLY_IN_A,
+				Section: "asec",
+				Key: "",
+				AVal: "",
+				BVal: "",
+			},
+		},
+		&ExpectedDiffResult{
+			Used: false,
+			Expected: &DiffResult{
+				State: DIFF_SECTION_ONLY_IN_B,
+				Section: "bsec",
+				Key: "",
+				AVal: "",
+				BVal: "",
+			},
+		},
+	}
+
+	results = DiffINI(aini, bini)
+	err = checkResults(expectedResults, results)
+	assert.Equal(t, err, nil)
+/*
+	results = DiffINI(aini, bini)
+	assert.Equal(t, len(results), 2)
+
+	result = results[0]
+	assert.Equal(t, result.State, DIFF_SECTION_ONLY_IN_A)
+	assert.Equal(t, result.Section, "asec")
+	assert.Equal(t, result.Key, "")
+	assert.Equal(t, result.AVal, "")
+	assert.Equal(t, result.BVal, "")
+
+	result = results[1]
+	assert.Equal(t, result.State, DIFF_SECTION_ONLY_IN_B)
+	assert.Equal(t, result.Section, "bsec")
+	assert.Equal(t, result.Key, "")
+	assert.Equal(t, result.AVal, "")
+	assert.Equal(t, result.BVal, "")
+*/
 }
 
 // run this by command : go test -test.bench="Benchmark1"
